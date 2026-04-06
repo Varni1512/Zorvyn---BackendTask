@@ -11,11 +11,8 @@ import userRoutes from './routes/user.routes';
 const app = express();
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "https://zorvyn-fawn-eight.vercel.app/"
-  ],
-  credentials: true
+    origin: true,
+    credentials: true
 }));
 app.use(express.json());
 
