@@ -1,11 +1,16 @@
 import mongoose from 'mongoose';
 
+let isConnected = false;
+
 export const connectDB = async () => {
+  if (isConnected) return;
+
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/finance-dashboard');
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    const conn = await mongoose.connect(process.env.MONGODB_URI as string);
+    isConnected = conn.connection.readyState === 1;
+    console.log("MongoDB Connected");
   } catch (error) {
-    console.error(`Error: ${(error as Error).message}`);
-    process.exit(1);
+    console.error("DB Error:", error);
+    throw error;
   }
 };
