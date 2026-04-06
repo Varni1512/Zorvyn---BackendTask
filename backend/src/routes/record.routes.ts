@@ -10,8 +10,8 @@ const router = express.Router();
 router.use(protect); // All routes require authentication
 
 router.get('/', getRecords);
-router.post('/', authorize(UserRole.ADMIN), validate(createRecordSchema), createRecord);
-router.put('/:id', authorize(UserRole.ADMIN), validate(updateRecordSchema), updateRecord);
-router.delete('/:id', authorize(UserRole.ADMIN), deleteRecord);
+router.post('/', validate(createRecordSchema), createRecord);
+router.put('/:id', validate(updateRecordSchema), updateRecord);
+router.delete('/:id', deleteRecord);
 
 export default router;

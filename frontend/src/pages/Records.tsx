@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { format } from 'date-fns';
+import { format, startOfMonth, endOfMonth, subMonths } from 'date-fns';
 import api from '../services/api';
 import { useAuth } from '../store/auth';
 import { Plus, Trash2, Edit2, Filter } from 'lucide-react';
@@ -29,6 +29,8 @@ const Records = () => {
   const [filters, setFilters] = useState({
     type: '',
     category: '',
+    sortAmount: '',
+    datePreset: '',
     startDate: '',
     endDate: ''
   });
@@ -44,12 +46,30 @@ const Records = () => {
       const params = new URLSearchParams();
       if (filters.type) params.append('type', filters.type);
       if (filters.category) params.append('category', filters.category);
-      if (filters.startDate) params.append('startDate', filters.startDate);
-      if (filters.endDate) params.append('endDate', filters.endDate);
+      if (filters.sortAmount) params.append('sortAmount', filters.sortAmount);
+
+      let start = filters.startDate;
+      let end = filters.endDate;
+      const today = new Date();
+
+      if (filters.datePreset === 'thisMonth') {
+        start = format(startOfMonth(today), 'yyyy-MM-dd');
+        end = format(endOfMonth(today), 'yyyy-MM-dd');
+      } else if (filters.datePreset === 'last2Months') {
+        start = format(startOfMonth(subMonths(today, 1)), 'yyyy-MM-dd'); // current month + 1 previous
+        end = format(endOfMonth(today), 'yyyy-MM-dd');
+      } else if (filters.datePreset === 'last3Months') {
+        start = format(startOfMonth(subMonths(today, 2)), 'yyyy-MM-dd'); // current month + 2 previous
+        end = format(endOfMonth(today), 'yyyy-MM-dd');
+      }
+
+      if (start) params.append('startDate', start);
+      if (end) params.append('endDate', end);
       
       const response = await api.get(`/records?${params.toString()}`);
       return response.data;
     },
+    placeholderData: keepPreviousData,
   });
 
   const createRecord = useMutation({
@@ -81,7 +101,8 @@ const Records = () => {
     },
   });
 
-  const canEdit = user?.role === 'Admin';
+  const canEdit = true;
+  const isAdmin = user?.role === 'Admin';
 
   const handleCloseModal = () => {
     setIsModalOpen(false);
@@ -109,7 +130,7 @@ const Records = () => {
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !records) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-zinc-900 border-t-transparent animate-spin"></div>
@@ -136,52 +157,92 @@ const Records = () => {
         )}
       </div>
 
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-zinc-200 mb-6 flex flex-wrap gap-4 items-end">
-        <div className="flex items-center gap-2 text-zinc-500 font-medium">
-          <Filter className="w-4 h-4" /> Filters:
+      <div className="bg-white rounded-2xl p-4 shadow-sm border border-zinc-200 mb-6">
+        <div className="flex items-center gap-2 text-zinc-800 font-semibold mb-4">
+          <Filter className="w-5 h-5 text-emerald-600" /> Filter & Sort
         </div>
-        <div>
-          <select 
-            value={filters.type} 
-            onChange={(e) => setFilters({...filters, type: e.target.value})}
-            className="px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="">All Types</option>
-            <option value="Income">Income</option>
-            <option value="Expense">Expense</option>
-          </select>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Record Type</label>
+            <select 
+              value={filters.type} 
+              onChange={(e) => setFilters({...filters, type: e.target.value})}
+              className="px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-zinc-50 hover:bg-white transition-colors cursor-pointer w-full"
+            >
+              <option value="">All Types</option>
+              <option value="Income">Income</option>
+              <option value="Expense">Expense</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Category</label>
+            <input 
+              type="text" 
+              placeholder="Search category..." 
+              value={filters.category}
+              onChange={(e) => setFilters({...filters, category: e.target.value})}
+              className="px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-zinc-50 hover:bg-white transition-colors w-full"
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Amount Sort</label>
+            <select 
+              value={filters.sortAmount} 
+              onChange={(e) => setFilters({...filters, sortAmount: e.target.value})}
+              className="px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-zinc-50 hover:bg-white transition-colors cursor-pointer w-full"
+            >
+              <option value="">Default (Newest)</option>
+              <option value="desc">Highest to Lowest</option>
+              <option value="asc">Lowest to Highest</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Date Range</label>
+            <select 
+              value={filters.datePreset} 
+              onChange={(e) => setFilters({...filters, datePreset: e.target.value, startDate: '', endDate: ''})}
+              className="px-3 py-2.5 rounded-xl border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-zinc-50 hover:bg-white transition-colors cursor-pointer w-full"
+            >
+              <option value="">All Time</option>
+              <option value="thisMonth">This Month</option>
+              <option value="last2Months">Last 2 Months</option>
+              <option value="last3Months">Last 3 Months</option>
+              <option value="custom">Custom Range</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <input 
-            type="text" 
-            placeholder="Category..." 
-            value={filters.category}
-            onChange={(e) => setFilters({...filters, category: e.target.value})}
-            className="px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 max-w-[150px]"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <input 
-            type="date" 
-            value={filters.startDate}
-            onChange={(e) => setFilters({...filters, startDate: e.target.value})}
-            className="px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-          <span className="text-zinc-500 text-sm">to</span>
-          <input 
-            type="date" 
-            value={filters.endDate}
-            onChange={(e) => setFilters({...filters, endDate: e.target.value})}
-            className="px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-        </div>
-        {(filters.type || filters.category || filters.startDate || filters.endDate) && (
-          <button 
-            onClick={() => setFilters({ type: '', category: '', startDate: '', endDate: '' })}
-            className="px-3 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium border border-transparent"
-          >
-            Clear
-          </button>
+
+        {filters.datePreset === 'custom' && (
+          <div className="flex items-center gap-3 mt-4 p-4 bg-zinc-50 rounded-xl border border-zinc-200">
+            <input 
+              type="date" 
+              value={filters.startDate}
+              onChange={(e) => setFilters({...filters, startDate: e.target.value})}
+              className="px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 flex-1 bg-white"
+            />
+            <span className="text-zinc-500 text-sm font-medium">to</span>
+            <input 
+              type="date" 
+              value={filters.endDate}
+              onChange={(e) => setFilters({...filters, endDate: e.target.value})}
+              className="px-3 py-2 rounded-lg border border-zinc-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 flex-1 bg-white"
+            />
+          </div>
+        )}
+
+        {(filters.type || filters.category || filters.sortAmount || filters.datePreset || filters.startDate || filters.endDate) && (
+          <div className="mt-4 pt-4 border-t border-zinc-100 flex justify-end">
+            <button 
+              onClick={() => setFilters({ type: '', category: '', sortAmount: '', datePreset: '', startDate: '', endDate: '' })}
+              className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 hover:text-red-700 rounded-xl transition-colors font-medium"
+            >
+              Reset Filters
+            </button>
+          </div>
         )}
       </div>
 
@@ -193,6 +254,7 @@ const Records = () => {
                 <th className="px-6 py-4">Date</th>
                 <th className="px-6 py-4">Type</th>
                 <th className="px-6 py-4">Category</th>
+                {isAdmin && <th className="px-6 py-4">User</th>}
                 <th className="px-6 py-4">Amount</th>
                 <th className="px-6 py-4">Notes</th>
                 {canEdit && <th className="px-6 py-4 text-right">Actions</th>}
@@ -206,7 +268,7 @@ const Records = () => {
                   </td>
                 </tr>
               ) : (
-                records?.map((record: { _id: string, date: string, type: string, category: string, amount: number, notes?: string }) => (
+                records?.map((record: { _id: string, date: string, type: string, category: string, amount: number, notes?: string, userId?: { name: string, email: string } }) => (
                   <tr key={record._id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                     <td className="px-6 py-4 text-gray-700">{format(new Date(record.date), 'MMM dd, yyyy')}</td>
                     <td className="px-6 py-4">
@@ -218,6 +280,12 @@ const Records = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 text-gray-700 font-medium">{record.category}</td>
+                    {isAdmin && (
+                      <td className="px-6 py-4 text-zinc-500">
+                        {record.userId?.name || 'Unknown'}
+                        <div className="text-xs text-zinc-400">{record.userId?.email || ''}</div>
+                      </td>
+                    )}
                     <td className="px-6 py-4 text-gray-900 font-bold">₹{record.amount.toLocaleString()}</td>
                     <td className="px-6 py-4 text-gray-500 text-sm">{record.notes || '-'}</td>
                     {canEdit && (

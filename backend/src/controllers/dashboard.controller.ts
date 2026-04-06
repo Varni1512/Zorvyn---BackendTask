@@ -1,60 +1,108 @@
 import { Request, Response } from 'express';
+import mongoose from 'mongoose';
 import { FinancialRecord, RecordType } from '../models/FinancialRecord';
+import { UserRole } from '../models/User';
 
 export const getDashboardSummary = async (req: Request, res: Response) => {
-  const userId = (req as any).user.id;
+  const user = (req as any).user;
+  let matchQuery: any = {};
 
-  const summary = await FinancialRecord.aggregate([
-    { $match: { userId: userId } }, // This needs to be ObjectId in a real scenario, but Mongoose aggregate sometimes string matches fail. Let's fix.
-  ]);
+  if (user.role === UserRole.VIEWER) {
+    matchQuery.userId = new mongoose.Types.ObjectId(user.id);
+  } else if (req.query.userId) {
+    matchQuery.userId = new mongoose.Types.ObjectId(req.query.userId as string);
+  }
 
-  // Fallback to simple query if aggregate is tricky with types
-  const records = await FinancialRecord.find({ userId });
-  
-  // Sort descending by date and grab the top 5 for recent activity
-  const recentActivity = [...records].sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 5);
+  try {
+    const summaryFacet = await FinancialRecord.aggregate([
+      { $match: matchQuery },
+      {
+        $facet: {
+          totals: [
+            {
+              $group: {
+                _id: '$type',
+                totalAmount: { $sum: '$amount' },
+              },
+            },
+          ],
+          categories: [
+            { $match: { type: RecordType.EXPENSE } },
+            {
+              $group: {
+                _id: '$category',
+                value: { $sum: '$amount' },
+              },
+            },
+            {
+              $project: {
+                name: '$_id',
+                value: 1,
+                _id: 0,
+              },
+            },
+          ],
+          trends: [
+            {
+              $group: {
+                _id: {
+                  year: { $year: '$date' },
+                  month: { $month: '$date' },
+                  type: '$type',
+                },
+                totalAmount: { $sum: '$amount' },
+              },
+            },
+          ],
+          recent: [
+            { $sort: { date: -1 } },
+            { $limit: 5 },
+          ],
+        },
+      },
+    ]);
 
-  let totalIncome = 0;
-  let totalExpense = 0;
-  
-  const categorySummary: Record<string, number> = {};
-  const monthlyTrends: Record<string, { income: number; expense: number }> = {};
+    const result = summaryFacet[0];
 
-  records.forEach((record) => {
-    if (record.type === RecordType.INCOME) {
-      totalIncome += record.amount;
-    } else {
-      totalExpense += record.amount;
-    }
-
-    if (record.type === RecordType.EXPENSE) {
-      if (!categorySummary[record.category]) {
-        categorySummary[record.category] = 0;
-      }
-      categorySummary[record.category] += record.amount;
-    }
-
-    const monthYear = `${record.date.getFullYear()}-${String(record.date.getMonth() + 1).padStart(2, '0')}`;
-    if (!monthlyTrends[monthYear]) {
-      monthlyTrends[monthYear] = { income: 0, expense: 0 };
-    }
+    let totalIncome = 0;
+    let totalExpense = 0;
     
-    if (record.type === RecordType.INCOME) {
-      monthlyTrends[monthYear].income += record.amount;
-    } else {
-      monthlyTrends[monthYear].expense += record.amount;
-    }
-  });
+    result.totals.forEach((t: any) => {
+      if (t._id === RecordType.INCOME) totalIncome = t.totalAmount;
+      if (t._id === RecordType.EXPENSE) totalExpense = t.totalAmount;
+    });
 
-  const categoryData = Object.entries(categorySummary).map(([name, value]) => ({ name, value }));
-  const trendsData = Object.entries(monthlyTrends).map(([date, data]) => ({ date, ...data })).sort((a, b) => a.date.localeCompare(b.date));
+    const monthlyTrends: Record<string, { income: number; expense: number }> = {};
+    
+    result.trends.forEach((t: any) => {
+      const monthStr = String(t._id.month).padStart(2, '0');
+      const dateKey = `${t._id.year}-${monthStr}`;
+      
+      if (!monthlyTrends[dateKey]) {
+        monthlyTrends[dateKey] = { income: 0, expense: 0 };
+      }
+      
+      if (t._id.type === RecordType.INCOME) {
+        monthlyTrends[dateKey].income += t.totalAmount;
+      } else {
+        monthlyTrends[dateKey].expense += t.totalAmount;
+      }
+    });
 
-  res.json({
-    totalIncome,
-    totalExpense,
-    balance: totalIncome - totalExpense,
-    categoryData,
-    trendsData,
-    recentActivity,
-  });
+    const trendsData = Object.entries(monthlyTrends)
+      .map(([date, data]) => ({ date, ...data }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json({
+      totalIncome,
+      totalExpense,
+      balance: totalIncome - totalExpense,
+      categoryData: result.categories,
+      trendsData,
+      recentActivity: result.recent,
+    });
+  } catch (error) {
+    console.error('Aggregation error:', error);
+    res.status(500).json({ message: 'Error aggregating dashboard data' });
+  }
 };

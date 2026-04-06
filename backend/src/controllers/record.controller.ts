@@ -7,23 +7,29 @@ export const getRecords = async (req: Request, res: Response) => {
   const { type, category, startDate, endDate } = req.query;
 
   let query: any = {};
-  
-  if (user.role !== UserRole.ADMIN) {
+
+  if (user.role === UserRole.VIEWER) {
     query.userId = user.id;
-  } else if (req.query.userId) { // Admin can optionally filter by userId
+  } else if (req.query.userId) {
     query.userId = req.query.userId;
   }
 
   if (type) query.type = type;
-  if (category) query.category = category;
-  
+  if (category) {
+    query.category = { $regex: category, $options: 'i' };
+  }
+
   if (startDate || endDate) {
     query.date = {};
     if (startDate) query.date.$gte = new Date(startDate as string);
     if (endDate) query.date.$lte = new Date(endDate as string);
   }
 
-  const records = await FinancialRecord.find(query).sort({ date: -1 });
+  let sortQuery: any = { date: -1, createdAt: -1 };
+  if (req.query.sortAmount === 'asc') sortQuery = { amount: 1 };
+  else if (req.query.sortAmount === 'desc') sortQuery = { amount: -1 };
+
+  const records = await FinancialRecord.find(query).populate('userId', 'name email').sort(sortQuery);
   res.json(records);
 };
 
